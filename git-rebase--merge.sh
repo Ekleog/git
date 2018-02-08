@@ -58,6 +58,7 @@ call_merge () {
 	echo "$msgnum" >"$state_dir/msgnum"
 	cmt="$(cat "$state_dir/cmt.$msgnum")"
 	echo "$cmt" > "$state_dir/current"
+	git update-ref ORIG_COMMIT "$cmt"
 	hd=$(git rev-parse --verify HEAD)
 	cmt_name=$(git symbolic-ref HEAD 2> /dev/null || echo HEAD)
 	eval GITHEAD_$cmt='"${cmt_name##refs/heads/}~$(($end - $msgnum))"'
@@ -138,11 +139,15 @@ skip)
 	finish_rb_merge
 	return
 	;;
+show-current-patch)
+	exec git show ORIG_COMMIT --
+	;;
 esac
 
 mkdir -p "$state_dir"
 echo "$onto_name" > "$state_dir/onto_name"
 write_basic_state
+rm -f "$(git rev-parse --git-path ORIG_COMMIT)"
 
 msgnum=0
 for cmt in $(git rev-list --reverse --no-merges "$revisions")
