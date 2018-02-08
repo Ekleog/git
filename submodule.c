@@ -590,7 +590,7 @@ void show_submodule_inline_diff(struct diff_options *o, const char *path,
 		struct object_id *one, struct object_id *two,
 		unsigned dirty_submodule)
 {
-	const struct object_id *old = the_hash_algo->empty_tree, *new = the_hash_algo->empty_tree;
+	const struct object_id *old = the_hash_algo->empty_tree, *new_oid = the_hash_algo->empty_tree;
 	struct commit *left = NULL, *right = NULL;
 	struct commit_list *merge_bases = NULL;
 	struct child_process cp = CHILD_PROCESS_INIT;
@@ -607,7 +607,7 @@ void show_submodule_inline_diff(struct diff_options *o, const char *path,
 	if (left)
 		old = one;
 	if (right)
-		new = two;
+		new_oid = two;
 
 	cp.git_cmd = 1;
 	cp.dir = path;
@@ -638,7 +638,7 @@ void show_submodule_inline_diff(struct diff_options *o, const char *path,
 	 * haven't yet been committed to the submodule yet.
 	 */
 	if (!(dirty_submodule & DIRTY_SUBMODULE_MODIFIED))
-		argv_array_push(&cp.args, oid_to_hex(new));
+		argv_array_push(&cp.args, oid_to_hex(new_oid));
 
 	prepare_submodule_repo_env(&cp.env_array);
 	if (start_command(&cp))
@@ -831,7 +831,7 @@ static int check_has_commit(const struct object_id *oid, void *data)
 		return 0;
 	default:
 		die(_("submodule entry '%s' (%s) is a %s, not a commit"),
-		    cb->path, oid_to_hex(oid), typename(type));
+		    cb->path, oid_to_hex(oid), type_name(type));
 	}
 }
 
@@ -1579,7 +1579,7 @@ static void submodule_reset_index(const char *path)
  */
 int submodule_move_head(const char *path,
 			 const char *old,
-			 const char *new,
+			 const char *new_head,
 			 unsigned flags)
 {
 	int ret = 0;
@@ -1660,7 +1660,7 @@ int submodule_move_head(const char *path,
 	if (!(flags & SUBMODULE_MOVE_HEAD_FORCE))
 		argv_array_push(&cp.args, old ? old : EMPTY_TREE_SHA1_HEX);
 
-	argv_array_push(&cp.args, new ? new : EMPTY_TREE_SHA1_HEX);
+	argv_array_push(&cp.args, new_head ? new_head : EMPTY_TREE_SHA1_HEX);
 
 	if (run_command(&cp)) {
 		ret = -1;
@@ -1668,7 +1668,7 @@ int submodule_move_head(const char *path,
 	}
 
 	if (!(flags & SUBMODULE_MOVE_HEAD_DRY_RUN)) {
-		if (new) {
+		if (new_head) {
 			child_process_init(&cp);
 			/* also set the HEAD accordingly */
 			cp.git_cmd = 1;
@@ -1677,7 +1677,7 @@ int submodule_move_head(const char *path,
 
 			prepare_submodule_repo_env(&cp.env_array);
 			argv_array_pushl(&cp.args, "update-ref", "HEAD",
-					 "--no-deref", new, NULL);
+					 "--no-deref", new_head, NULL);
 
 			if (run_command(&cp)) {
 				ret = -1;
