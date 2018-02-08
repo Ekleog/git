@@ -96,9 +96,15 @@ static int run_sequencer(int argc, const char **argv, struct replay_opts *opts)
 	const char *me = action_name(opts);
 	int cmd = 0;
 	struct option base_options[] = {
-		OPT_CMDMODE(0, "quit", &cmd, N_("end revert or cherry-pick sequence"), 'q'),
-		OPT_CMDMODE(0, "continue", &cmd, N_("resume revert or cherry-pick sequence"), 'c'),
-		OPT_CMDMODE(0, "abort", &cmd, N_("cancel revert or cherry-pick sequence"), 'a'),
+		OPT_CMDMODE_F(0, "quit", &cmd,
+			      N_("end revert or cherry-pick sequence"),
+			      'q', PARSE_OPT_NOCOMPLETE),
+		OPT_CMDMODE_F(0, "continue", &cmd,
+			      N_("resume revert or cherry-pick sequence"),
+			      'c', PARSE_OPT_NOCOMPLETE),
+		OPT_CMDMODE_F(0, "abort", &cmd,
+			      N_("cancel revert or cherry-pick sequence"),
+			      'a', PARSE_OPT_NOCOMPLETE),
 		OPT_BOOL('n', "no-commit", &opts->no_commit, N_("don't automatically commit")),
 		OPT_BOOL('e', "edit", &opts->edit, N_("edit the commit message")),
 		OPT_NOOP_NOARG('r', NULL),

@@ -280,6 +280,30 @@ __gitcomp ()
 	esac
 }
 
+# This function is equivalent to
+#
+#    __gitcomp "$(git xxx --git-completion-helper) ..."
+#
+# except that the value from $(git) is cached
+__gitcomp_builtin ()
+{
+	# spaces must be replaced with underscore for multi-word
+	# commands, e.g. "git remote add" becomes remote_add.
+	local cmd="$1"
+	shift
+
+	local var=__gitcomp_builtin_"${cmd/-/_}"
+	local options
+	eval "options=\$$var"
+
+	if [ -z "$options" ]; then
+		eval "$var=\$(__git \${cmd/_/ } --git-completion-helper)"
+		eval "options=\$$var"
+	fi
+
+	__gitcomp "$options $*"
+}
+
 # Variation of __gitcomp_nl () that appends to the existing list of
 # completion candidates, COMPREPLY.
 __gitcomp_nl_append ()
@@ -1086,12 +1110,7 @@ _git_am ()
 		return
 		;;
 	--*)
-		__gitcomp "
-			--3way --committer-date-is-author-date --ignore-date
-			--ignore-whitespace --ignore-space-change
-			--interactive --keep --no-utf8 --signoff --utf8
-			--whitespace= --scissors
-			"
+		__gitcomp_builtin am "--no-utf8"
 		return
 	esac
 }
@@ -1104,14 +1123,7 @@ _git_apply ()
 		return
 		;;
 	--*)
-		__gitcomp "
-			--stat --numstat --summary --check --index
-			--cached --index-info --reverse --reject --unidiff-zero
-			--apply --no-add --exclude=
-			--ignore-whitespace --ignore-space-change
-			--whitespace= --inaccurate-eof --verbose
-			--recount --directory=
-			"
+		__gitcomp_builtin apply
 		return
 	esac
 }
@@ -1120,10 +1132,7 @@ _git_add ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--interactive --refresh --patch --update --dry-run
-			--ignore-errors --intent-to-add --force --edit --chmod=
-			"
+		__gitcomp_builtin add
 		return
 	esac
 
@@ -1200,12 +1209,8 @@ _git_branch ()
 		__git_complete_refs --cur="${cur##--set-upstream-to=}"
 		;;
 	--*)
-		__gitcomp "
-			--color --no-color --verbose --abbrev= --no-abbrev
-			--track --no-track --contains --no-contains --merged --no-merged
-			--set-upstream-to= --edit-description --list
-			--unset-upstream --delete --move --copy --remotes
-			--column --no-column --sort= --points-at
+		__gitcomp_builtin branch "--no-color --no-abbrev
+			--no-track --no-column
 			"
 		;;
 	*)
@@ -1247,11 +1252,7 @@ _git_checkout ()
 		__gitcomp "diff3 merge" "" "${cur##--conflict=}"
 		;;
 	--*)
-		__gitcomp "
-			--quiet --ours --theirs --track --no-track --merge
-			--conflict= --orphan --patch --detach --ignore-skip-worktree-bits
-			--recurse-submodules --no-recurse-submodules
-			"
+		__gitcomp_builtin checkout "--no-track --no-recurse-submodules"
 		;;
 	*)
 		# check if --track, --no-track, or --no-guess was specified
@@ -1280,7 +1281,7 @@ _git_cherry_pick ()
 	fi
 	case "$cur" in
 	--*)
-		__gitcomp "--edit --no-commit --signoff --strategy= --mainline"
+		__gitcomp_builtin cherry-pick
 		;;
 	*)
 		__git_complete_refs
@@ -1292,7 +1293,7 @@ _git_clean ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--dry-run --quiet"
+		__gitcomp_builtin clean
 		return
 		;;
 	esac
@@ -1305,26 +1306,7 @@ _git_clone ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--local
-			--no-hardlinks
-			--shared
-			--reference
-			--quiet
-			--no-checkout
-			--bare
-			--mirror
-			--origin
-			--upload-pack
-			--template=
-			--depth
-			--single-branch
-			--no-tags
-			--branch
-			--recurse-submodules
-			--no-single-branch
-			--shallow-submodules
-			"
+		__gitcomp_builtin clone "--no-single-branch"
 		return
 		;;
 	esac
@@ -1357,16 +1339,7 @@ _git_commit ()
 		return
 		;;
 	--*)
-		__gitcomp "
-			--all --author= --signoff --verify --no-verify
-			--edit --no-edit
-			--amend --include --only --interactive
-			--dry-run --reuse-message= --reedit-message=
-			--reset-author --file= --message= --template=
-			--cleanup= --untracked-files --untracked-files=
-			--verbose --quiet --fixup= --squash=
-			--patch --short --date --allow-empty
-			"
+		__gitcomp_builtin commit "--no-edit --verify"
 		return
 	esac
 
@@ -1382,11 +1355,7 @@ _git_describe ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--all --tags --contains --abbrev= --candidates=
-			--exact-match --debug --long --match --always --first-parent
-			--exclude --dirty --broken
-			"
+		__gitcomp_builtin describe
 		return
 	esac
 	__git_complete_refs
@@ -1411,7 +1380,7 @@ __git_diff_common_options="--stat --numstat --shortstat --summary
 			--dirstat --dirstat= --dirstat-by-file
 			--dirstat-by-file= --cumulative
 			--diff-algorithm=
-			--submodule --submodule=
+			--submodule --submodule= --ignore-submodules
 "
 
 _git_diff ()
@@ -1452,11 +1421,11 @@ _git_difftool ()
 		return
 		;;
 	--*)
-		__gitcomp "--cached --staged --pickaxe-all --pickaxe-regex
-			--base --ours --theirs
-			--no-renames --diff-filter= --find-copies-harder
-			--relative --ignore-submodules
-			--tool="
+		__gitcomp_builtin difftool "$__git_diff_common_options
+					--base --cached --ours --theirs
+					--pickaxe-all --pickaxe-regex
+					--relative --staged
+					"
 		return
 		;;
 	esac
@@ -1464,12 +1433,6 @@ _git_difftool ()
 }
 
 __git_fetch_recurse_submodules="yes on-demand no"
-
-__git_fetch_options="
-	--quiet --verbose --append --upload-pack --force --keep --depth=
-	--tags --no-tags --all --prune --dry-run --recurse-submodules=
-	--unshallow --update-shallow
-"
 
 _git_fetch ()
 {
@@ -1479,7 +1442,7 @@ _git_fetch ()
 		return
 		;;
 	--*)
-		__gitcomp "$__git_fetch_options"
+		__gitcomp_builtin fetch "--no-tags"
 		return
 		;;
 	esac
@@ -1516,10 +1479,7 @@ _git_fsck ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--tags --root --unreachable --cache --no-reflogs --full
-			--strict --verbose --lost-found --name-objects
-			"
+		__gitcomp_builtin fsck "--no-reflogs"
 		return
 		;;
 	esac
@@ -1529,7 +1489,7 @@ _git_gc ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--prune --aggressive"
+		__gitcomp_builtin gc
 		return
 		;;
 	esac
@@ -1585,21 +1545,7 @@ _git_grep ()
 
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--cached
-			--text --ignore-case --word-regexp --invert-match
-			--full-name --line-number
-			--extended-regexp --basic-regexp --fixed-strings
-			--perl-regexp
-			--threads
-			--files-with-matches --name-only
-			--files-without-match
-			--max-depth
-			--count
-			--and --or --not --all-match
-			--break --heading --show-function --function-context
-			--untracked --no-index
-			"
+		__gitcomp_builtin grep
 		return
 		;;
 	esac
@@ -1617,7 +1563,7 @@ _git_help ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--all --guides --info --man --web"
+		__gitcomp_builtin help
 		return
 		;;
 	esac
@@ -1640,7 +1586,7 @@ _git_init ()
 		return
 		;;
 	--*)
-		__gitcomp "--quiet --bare --template= --shared --shared="
+		__gitcomp_builtin init
 		return
 		;;
 	esac
@@ -1650,13 +1596,7 @@ _git_ls_files ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--cached --deleted --modified --others --ignored
-			--stage --directory --no-empty-directory --unmerged
-			--killed --exclude= --exclude-from=
-			--exclude-per-directory= --exclude-standard
-			--error-unmatch --with-tree= --full-name
-			--abbrev --ignored --exclude-per-directory
-			"
+		__gitcomp_builtin ls-files "--no-empty-directory"
 		return
 		;;
 	esac
@@ -1670,7 +1610,7 @@ _git_ls_remote ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--heads --tags --refs --get-url --symref"
+		__gitcomp_builtin ls-remote
 		return
 		;;
 	esac
@@ -1794,22 +1734,19 @@ _git_log ()
 	__git_complete_revlist
 }
 
-# Common merge options shared by git-merge(1) and git-pull(1).
-__git_merge_options="
-	--no-commit --no-stat --log --no-log --squash --strategy
-	--commit --stat --no-squash --ff --no-ff --ff-only --edit --no-edit
-	--verify-signatures --no-verify-signatures --gpg-sign
-	--quiet --verbose --progress --no-progress
-"
-
 _git_merge ()
 {
 	__git_complete_strategy && return
 
 	case "$cur" in
 	--*)
-		__gitcomp "$__git_merge_options
-			--rerere-autoupdate --no-rerere-autoupdate --abort --continue"
+		__gitcomp_builtin merge "--rerere-autoupdate
+				--no-rerere-autoupdate
+				--no-commit --no-edit --no-ff
+				--no-log --no-progress
+				--no-squash --no-stat
+				--no-verify-signatures
+				"
 		return
 	esac
 	__git_complete_refs
@@ -1833,7 +1770,7 @@ _git_merge_base ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--octopus --independent --is-ancestor --fork-point"
+		__gitcomp_builtin merge-base
 		return
 		;;
 	esac
@@ -1844,7 +1781,7 @@ _git_mv ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--dry-run"
+		__gitcomp_builtin mv
 		return
 		;;
 	esac
@@ -1860,7 +1797,7 @@ _git_mv ()
 
 _git_name_rev ()
 {
-	__gitcomp "--tags --all --stdin"
+	__gitcomp_builtin name-rev
 }
 
 _git_notes ()
@@ -1870,7 +1807,7 @@ _git_notes ()
 
 	case "$subcommand,$cur" in
 	,--*)
-		__gitcomp '--ref'
+		__gitcomp_builtin notes
 		;;
 	,*)
 		case "$prev" in
@@ -1886,15 +1823,17 @@ _git_notes ()
 	add,--reedit-message=*|append,--reedit-message=*)
 		__git_complete_refs --cur="${cur#*=}"
 		;;
-	add,--*|append,--*)
-		__gitcomp '--file= --message= --reedit-message=
-				--reuse-message='
+	add,--*)
+		__gitcomp_builtin notes_add
+		;;
+	append,--*)
+		__gitcomp_builtin notes_append
 		;;
 	copy,--*)
-		__gitcomp '--stdin'
+		__gitcomp_builtin notes_copy
 		;;
 	prune,--*)
-		__gitcomp '--dry-run --verbose'
+		__gitcomp_builtin notes_prune
 		;;
 	prune,*)
 		;;
@@ -1920,12 +1859,11 @@ _git_pull ()
 		return
 		;;
 	--*)
-		__gitcomp "
-			--rebase --no-rebase
-			--autostash --no-autostash
-			$__git_merge_options
-			$__git_fetch_options
-		"
+		__gitcomp_builtin pull "--no-autostash --no-commit --no-edit
+					--no-ff --no-log --no-progress --no-rebase
+					--no-squash --no-stat --no-tags
+					--no-verify-signatures"
+
 		return
 		;;
 	esac
@@ -1976,12 +1914,7 @@ _git_push ()
 		return
 		;;
 	--*)
-		__gitcomp "
-			--all --mirror --tags --dry-run --force --verbose
-			--quiet --prune --delete --follow-tags
-			--receive-pack= --repo= --set-upstream
-			--force-with-lease --force-with-lease= --recurse-submodules=
-		"
+		__gitcomp_builtin push
 		return
 		;;
 	esac
@@ -2119,11 +2052,7 @@ _git_status ()
 		return
 		;;
 	--*)
-		__gitcomp "
-			--short --branch --porcelain --long --verbose
-			--untracked-files= --ignore-submodules= --ignored
-			--column= --no-column
-			"
+		__gitcomp_builtin status "--no-column"
 		return
 		;;
 	esac
@@ -2265,14 +2194,7 @@ _git_config ()
 	esac
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--system --global --local --file=
-			--list --replace-all
-			--get --get-all --get-regexp
-			--add --unset --unset-all
-			--remove-section --rename-section
-			--name-only
-			"
+		__gitcomp_builtin config
 		return
 		;;
 	branch.*.*)
@@ -2672,7 +2594,7 @@ _git_remote ()
 	if [ -z "$subcommand" ]; then
 		case "$cur" in
 		--*)
-			__gitcomp "--verbose"
+			__gitcomp_builtin remote
 			;;
 		*)
 			__gitcomp "$subcommands"
@@ -2683,33 +2605,33 @@ _git_remote ()
 
 	case "$subcommand,$cur" in
 	add,--*)
-		__gitcomp "--track --master --fetch --tags --no-tags --mirror="
+		__gitcomp_builtin remote_add "--no-tags"
 		;;
 	add,*)
 		;;
 	set-head,--*)
-		__gitcomp "--auto --delete"
+		__gitcomp_builtin remote_set-head
 		;;
 	set-branches,--*)
-		__gitcomp "--add"
+		__gitcomp_builtin remote_set-branches
 		;;
 	set-head,*|set-branches,*)
 		__git_complete_remote_or_refspec
 		;;
 	update,--*)
-		__gitcomp "--prune"
+		__gitcomp_builtin remote_update
 		;;
 	update,*)
 		__gitcomp "$(__git_get_config_variables "remotes")"
 		;;
 	set-url,--*)
-		__gitcomp "--push --add --delete"
+		__gitcomp_builtin remote_set-url
 		;;
 	get-url,--*)
-		__gitcomp "--push --all"
+		__gitcomp_builtin remote_get-url
 		;;
 	prune,--*)
-		__gitcomp "--dry-run"
+		__gitcomp_builtin remote_prune
 		;;
 	*)
 		__gitcomp_nl "$(__git_remotes)"
@@ -2721,7 +2643,7 @@ _git_replace ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--edit --graft --format= --list --delete"
+		__gitcomp_builtin replace
 		return
 		;;
 	esac
@@ -2745,7 +2667,7 @@ _git_reset ()
 
 	case "$cur" in
 	--*)
-		__gitcomp "--merge --mixed --hard --soft --patch --keep"
+		__gitcomp_builtin reset
 		return
 		;;
 	esac
@@ -2761,10 +2683,7 @@ _git_revert ()
 	fi
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--edit --mainline --no-edit --no-commit --signoff
-			--strategy= --strategy-option=
-			"
+		__gitcomp_builtin revert "--no-edit"
 		return
 		;;
 	esac
@@ -2775,7 +2694,7 @@ _git_rm ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "--cached --dry-run --ignore-unmatch --quiet"
+		__gitcomp_builtin rm
 		return
 		;;
 	esac
@@ -2833,12 +2752,7 @@ _git_show_branch ()
 {
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--all --remotes --topo-order --date-order --current --more=
-			--list --independent --merge-base --no-name
-			--color --no-color
-			--sha1-name --sparse --topics --reflog
-			"
+		__gitcomp_builtin show-branch "--no-color"
 		return
 		;;
 	esac
@@ -3071,11 +2985,7 @@ _git_tag ()
 
 	case "$cur" in
 	--*)
-		__gitcomp "
-			--list --delete --verify --annotate --message --file
-			--sign --cleanup --local-user --force --column --sort=
-			--contains --no-contains --points-at --merged --no-merged --create-reflog
-			"
+		__gitcomp_builtin tag
 		;;
 	esac
 }
@@ -3094,16 +3004,16 @@ _git_worktree ()
 	else
 		case "$subcommand,$cur" in
 		add,--*)
-			__gitcomp "--detach"
+			__gitcomp_builtin worktree_add
 			;;
 		list,--*)
-			__gitcomp "--porcelain"
+			__gitcomp_builtin worktree_list
 			;;
 		lock,--*)
-			__gitcomp "--reason"
+			__gitcomp_builtin worktree_lock
 			;;
 		prune,--*)
-			__gitcomp "--dry-run --expire --verbose"
+			__gitcomp_builtin worktree_prune
 			;;
 		remove,--*)
 			__gitcomp "--force"
