@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# Copyright (c) 2018 Leo Gaspard
+#
+# The "tweak-fetch" hook is run during the fetching process. It is called with
+# no parameters. Its communication protocol is reading fetched references on
+# stdin, and outputting references to update on stdout, with the same protocol
+# described in `git help hooks`.
+#
+# This sample shows how to refuse fetching any unsigned commit.
+
+while read hash merge remote_ref local_ref; do
+    allowed_commit="$(git rev-parse "$local_ref")"
+    git rev-list "$local_ref..$hash" | tac | while read commit; do
+        if git verify-commit "$commit" > /dev/null 2>&1; then
+            allowed_commit="$commit"
+        else
+            echo "Commit '$commit' is not signed! Refusing to fetch past it" >&2
+            break
+        fi
+    done
+    echo "$allowed_commit $merge $remote_ref $local_ref"
+done
+# TODO: actually verify this hook works

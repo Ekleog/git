@@ -177,6 +177,43 @@ This hook can be used to perform repository validity checks, auto-display
 differences from the previous HEAD if different, or set working dir metadata
 properties.
 
+tweak-fetch
+~~~~~~~~~~~
+
+This hook is invoked by 'git fetch' (commonly called by 'git pull'), after refs
+have been fetched from the remote repository. It is not executed, if nothing was
+fetched.
+
+The output of the hook is used to update the remote-tracking branches, and
+`.git/FETCH_HEAD`, in preparation for a later merge operation done by 'git
+merge'.
+
+It takes no arguments, but is fed a line of the following format on its standard
+input for each ref that was fetched.
+
+  <sha1> SP not-for-merge|merge|ignore SP <remote-refname> SP <local-refname> LF
+
+Where the "not-for-merge" flag indicates the ref is not to be merged into the
+current branch, and the "merge" flag indicates that 'git merge' should later
+merge it.
+
+The `<remote-refname>` is the remote's name for the ref that was fetched, and
+`<local-refname>` is a name of a remote-tracking branch, like
+"refs/remotes/origin/master". `<local-refname>` can be undefined if the fetched
+ref is not being stored in a local refname. In this case, it will be set to `@`,
+an invalide refspec, so that scripts can be written more easily.
+
+TODO: Add documentation for the “ignore” parameter. Unfortunately, I'm not
+really sure I get what this does or what invariants it is supposed to maintain
+(eg. all “ignore” updates at the end of the refs list?), so this may also
+require code changes.
+
+The hook must consume all of its standard input, and output back lines of the
+same format. It can modify its input as desired, including adding or removing
+lines, updating the sha1 (i.e. re-point the remote-tracking branch), changing
+the merge flag, and changing the `<local-refname>` (i.e. use different
+remote-tracking branch).
+
 post-merge
 ~~~~~~~~~~
 

@@ -28,6 +28,8 @@ static const char * const builtin_fetch_usage[] = {
 	NULL
 };
 
+static const char tweak_fetch_hook[] = "tweak-fetch";
+
 enum {
 	TAGS_UNSET = 0,
 	TAGS_DEFAULT = 1,
@@ -180,6 +182,206 @@ static struct option builtin_fetch_options[] = {
 			TRANSPORT_FAMILY_IPV6),
 	OPT_END()
 };
+
+static int feed_tweak_fetch_hook(int in, int out, void *data)
+{
+	struct ref *ref;
+	struct strbuf buf = STRBUF_INIT;
+	const char *kw, *peer_ref;
+	char oid_buf[GIT_SHA1_HEXSZ + 1];
+	int ret;
+
+	for (ref = data; ref; ref = ref->next) {
+		if (ref->fetch_head_status == FETCH_HEAD_MERGE)
+			kw = "merge";
+		else if (ref->fetch_head_status == FETCH_HEAD_IGNORE)
+			kw = "ignore";
+		else
+			kw = "not-for-merge";
+		if (!ref->name)
+			die("trying to fetch an inexistant ref");
+		if (ref->peer_ref && ref->peer_ref->name)
+			peer_ref = ref->peer_ref->name;
+		else
+			peer_ref = "@";
+		strbuf_addf(&buf, "%s %s %s %s\n",
+				oid_to_hex_r(oid_buf, &ref->old_oid), kw,
+				ref->name, peer_ref);
+	}
+
+	ret = write_in_full(out, buf.buf, buf.len) != buf.len;
+	if (ret)
+		warning("%s hook failed to consume all its input",
+				tweak_fetch_hook);
+	close(out);
+	strbuf_release(&buf);
+	return ret;
+}
+
+static struct ref *parse_tweak_fetch_hook_line(char *l,
+		struct string_list *existing_refs)
+{
+	struct ref *ref = NULL, *peer_ref = NULL;
+	struct string_list_item *peer_item = NULL;
+	char *words[4];
+	int i, word = 0;
+	char *problem;
+
+	for (i = 0; l[i]; i++) {
+		if (isspace(l[i])) {
+			l[i] = '\0';
+			words[word] = l;
+			l += i + 1;
+			i = 0;
+			word++;
+			if (word > 3) {
+				problem = "too many words";
+				goto unparsable;
+			}
+		}
+	}
+	if (word < 3) {
+		problem = "not enough words";
+		goto unparsable;
+	}
+
+	ref = alloc_ref(words[2]);
+	peer_ref = ref->peer_ref = alloc_ref(l);
+	ref->peer_ref->force = 1;
+
+	if (get_oid_hex(words[0], &ref->old_oid)) {
+		problem="bad oid";
+		goto unparsable;
+	}
+
+	if (!strcmp(words[1], "merge")) {
+		ref->fetch_head_status = FETCH_HEAD_MERGE;
+	} else if (!strcmp(words[1], "ignore")) {
+		ref->fetch_head_status = FETCH_HEAD_IGNORE;
+	} else if (!strcmp(words[1], "not-for-merge")) {
+		ref->fetch_head_status = FETCH_HEAD_NOT_FOR_MERGE;
+	} else {
+		problem = "bad merge flag";
+		goto unparsable;
+	}
+
+	peer_item = string_list_lookup(existing_refs, peer_ref->name);
+	if (peer_item)
+		hashcpy(peer_ref->old_oid.hash, peer_item->util);
+
+	return ref;
+
+unparsable:
+	warning("%s hook output a wrongly formed line: %s",
+			tweak_fetch_hook, problem);
+	free(ref);
+	free(peer_ref);
+	return NULL;
+}
+
+static struct refs_result read_tweak_fetch_hook(int in)
+{
+	struct refs_result res;
+	FILE *f;
+	struct strbuf buf;
+	struct string_list existing_refs = STRING_LIST_INIT_DUP;
+	struct ref *ref, *prevref = NULL;
+
+	res.status = 0;
+	res.new_refs = NULL;
+
+	f = fdopen(in, "r");
+	if (f == NULL) {
+		res.status = 1;
+		return res;
+	}
+
+	strbuf_init(&buf, 128);
+	for_each_ref(add_existing, &existing_refs);
+
+	while (strbuf_getline(&buf, f) != EOF) {
+		char *l = strbuf_detach(&buf, NULL);
+		ref = parse_tweak_fetch_hook_line(l, &existing_refs);
+		if (!ref) {
+			res.status = 1;
+		} else {
+			if (prevref) {
+				prevref->next = ref;
+				prevref = ref;
+			} else {
+				res.new_refs = prevref = ref;
+			}
+		}
+		free(l);
+	}
+
+	string_list_clear(&existing_refs, 0);
+	strbuf_release(&buf);
+	fclose(f);
+	return res;
+}
+
+/*
+ * The hook is fed lines of the form:
+ * <sha1> SP <not-for-merge|merge|ignore> SP <remote-refname> SP <local-refname> LF
+ * And should output rewritten lines of the same form.
+ */
+static struct ref *run_tweak_fetch_hook(struct ref *fetched_refs)
+{
+	struct child_process hook;
+	const char *argv[2];
+	struct async async;
+	struct refs_result res;
+
+	if (!fetched_refs)
+		return fetched_refs;
+
+	argv[0] = find_hook(tweak_fetch_hook);
+	if (access(argv[0], X_OK) < 0)
+		return fetched_refs;
+	argv[1] = NULL;
+
+	memset(&hook, 0, sizeof(hook));
+	hook.argv = argv;
+	hook.in = -1;
+	hook.out = -1;
+	if (start_command(&hook))
+		return fetched_refs;
+
+	/*
+	 * Use an async writer to feed the hook process.
+	 * This allows the hook to read and write a line at
+	 * a time without blocking.
+	 */
+	memset(&async, 0, sizeof(async));
+	async.proc = feed_tweak_fetch_hook;
+	async.data = fetched_refs;
+	async.out = hook.in;
+	if (start_async(&async)) {
+		close(hook.in);
+		close(hook.out);
+		finish_command(&hook);
+		return fetched_refs;
+	}
+
+	res = read_tweak_fetch_hook(hook.out);
+	res.status |= finish_async(&async);
+	res.status |= finish_command(&hook);
+
+	if (res.status) {
+		warning("%s hook failed, ignoring its output", tweak_fetch_hook);
+		free(res.new_refs);
+		return fetched_refs;
+	} else {
+		/*
+		 * The new_refs are returned, to be used in place of
+		 * fetched_refs, so it is not needed anymore and can
+		 * be freed here.
+		 */
+		free_refs(fetched_refs);
+		return res.new_refs;
+	}
+}
 
 static void unlock_pack(void)
 {
@@ -934,7 +1136,7 @@ static struct refs_result fetch_refs(struct transport *transport,
 		ret.status = transport_fetch_refs(transport, ref_map);
 	}
 	if (!ret.status) {
-		ret.new_refs = ref_map;
+		ret.new_refs = run_tweak_fetch_hook(ref_map);
 		ret.status |= store_updated_refs(transport->url,
 				transport->remote->name,
 				ret.new_refs);
@@ -1150,7 +1352,11 @@ static int do_fetch(struct transport *transport,
 				   transport->url);
 		}
 	}
-
+	// TODO(?): Were this placed above the `if (prune)`, it would avoid the
+	// unfortunate fact that `git fetch --prune` first drops the ref then
+	// re-adds it (in cases where the tweak-fetch hook renames it). There is
+	// likely a better solution than this one that would break Commit
+	// 10a6cc889 ("fetch --prune: Run prune before fetching", 2014-01-02)
 	res = fetch_refs(transport, ref_map);
 	ref_map = res.new_refs;
 	if (res.status) {
