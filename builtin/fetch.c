@@ -34,6 +34,11 @@ enum {
 	TAGS_SET = 2
 };
 
+struct refs_result {
+	struct ref *new_refs;
+	int status;
+};
+
 static int fetch_prune_config = -1; /* unspecified */
 static int prune = -1; /* unspecified */
 #define PRUNE_BY_DEFAULT 0 /* do we prune by default? */
@@ -56,6 +61,18 @@ static int recurse_submodules_default = RECURSE_SUBMODULES_ON_DEMAND;
 static int shown_url = 0;
 static int refmap_alloc, refmap_nr;
 static const char **refmap_array;
+
+static int add_existing(const char *refname, const struct object_id *oid,
+			int flag, void *cbdata)
+{
+	struct string_list *list = (struct string_list *)cbdata;
+	struct string_list_item *item = string_list_insert(list, refname);
+	struct object_id *old_oid = xmalloc(sizeof(*old_oid));
+
+	oidcpy(old_oid, oid);
+	item->util = old_oid;
+	return 0;
+}
 
 static int git_fetch_config(const char *k, const char *v, void *cb)
 {
@@ -215,18 +232,6 @@ static void add_merge_config(struct ref **head,
 		for (rm = *old_tail; rm; rm = rm->next)
 			rm->fetch_head_status = FETCH_HEAD_MERGE;
 	}
-}
-
-static int add_existing(const char *refname, const struct object_id *oid,
-			int flag, void *cbdata)
-{
-	struct string_list *list = (struct string_list *)cbdata;
-	struct string_list_item *item = string_list_insert(list, refname);
-	struct object_id *old_oid = xmalloc(sizeof(*old_oid));
-
-	oidcpy(old_oid, oid);
-	item->util = old_oid;
-	return 0;
 }
 
 static int will_fetch(struct ref **head, const unsigned char *sha1)
@@ -920,15 +925,20 @@ static int quickfetch(struct ref *ref_map)
 	return check_connected(iterate_ref_map, &rm, &opt);
 }
 
-static int fetch_refs(struct transport *transport, struct ref *ref_map)
+static struct refs_result fetch_refs(struct transport *transport,
+		struct ref *ref_map)
 {
-	int ret = quickfetch(ref_map);
-	if (ret)
-		ret = transport_fetch_refs(transport, ref_map);
-	if (!ret)
-		ret |= store_updated_refs(transport->url,
+	struct refs_result ret;
+	ret.status = quickfetch(ref_map);
+	if (ret.status) {
+		ret.status = transport_fetch_refs(transport, ref_map);
+	}
+	if (!ret.status) {
+		ret.new_refs = ref_map;
+		ret.status |= store_updated_refs(transport->url,
 				transport->remote->name,
-				ref_map);
+				ret.new_refs);
+	}
 	transport_unlock_pack(transport);
 	return ret;
 }
@@ -1048,9 +1058,11 @@ static struct transport *prepare_transport(struct remote *remote, int deepen)
 	return transport;
 }
 
-static void backfill_tags(struct transport *transport, struct ref *ref_map)
+static struct refs_result backfill_tags(struct transport *transport,
+		struct ref *ref_map)
 {
 	int cannot_reuse;
+	struct refs_result res;
 
 	/*
 	 * Once we have set TRANS_OPT_DEEPEN_SINCE, we can't unset it
@@ -1069,12 +1081,14 @@ static void backfill_tags(struct transport *transport, struct ref *ref_map)
 	transport_set_option(transport, TRANS_OPT_FOLLOWTAGS, NULL);
 	transport_set_option(transport, TRANS_OPT_DEPTH, "0");
 	transport_set_option(transport, TRANS_OPT_DEEPEN_RELATIVE, NULL);
-	fetch_refs(transport, ref_map);
+	res = fetch_refs(transport, ref_map);
 
 	if (gsecondary) {
 		transport_disconnect(gsecondary);
 		gsecondary = NULL;
 	}
+
+	return res;
 }
 
 static int do_fetch(struct transport *transport,
@@ -1083,6 +1097,7 @@ static int do_fetch(struct transport *transport,
 	struct string_list existing_refs = STRING_LIST_INIT_DUP;
 	struct ref *ref_map;
 	struct ref *rm;
+	struct refs_result res;
 	int autotags = (transport->remote->fetch_tags == 1);
 	int retcode = 0;
 
@@ -1135,7 +1150,10 @@ static int do_fetch(struct transport *transport,
 				   transport->url);
 		}
 	}
-	if (fetch_refs(transport, ref_map)) {
+
+	res = fetch_refs(transport, ref_map);
+	ref_map = res.new_refs;
+	if (res.status) {
 		free_refs(ref_map);
 		retcode = 1;
 		goto cleanup;
@@ -1148,8 +1166,10 @@ static int do_fetch(struct transport *transport,
 		struct ref **tail = &ref_map;
 		ref_map = NULL;
 		find_non_local_tags(transport, &ref_map, &tail);
-		if (ref_map)
-			backfill_tags(transport, ref_map);
+		if (ref_map) {
+			res = backfill_tags(transport, ref_map);
+			ref_map = res.new_refs;
+		}
 		free_refs(ref_map);
 	}
 
